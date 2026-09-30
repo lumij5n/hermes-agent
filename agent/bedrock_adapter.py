@@ -74,6 +74,11 @@ BEDROCK_OPENAI_RESPONSES_MODEL_IDS: Tuple[str, ...] = (
     "openai.gpt-5.6-sol",
     "openai.gpt-5.6-terra",
     "openai.gpt-5.6-luna",
+    # GPT-6 family (Astra/Sol/Luna) + GPT-6.1 Sol (GA 2026-09-29) — Mantle-only.
+    "openai.gpt-6-astra",
+    "openai.gpt-6-sol",
+    "openai.gpt-6.1-sol",
+    "openai.gpt-6-luna",
 )
 _BEDROCK_OPENAI_HOST_RE = re.compile(
     r"^bedrock-mantle\.([a-z0-9-]+)\.api\.aws$", re.IGNORECASE
@@ -1857,6 +1862,10 @@ BEDROCK_CONTEXT_LENGTHS: Dict[str, int] = {
     "openai.gpt-5.6-sol":            272_000,
     "openai.gpt-5.6-terra":          272_000,
     "openai.gpt-5.6-luna":           272_000,
+    "openai.gpt-6-astra":            272_000,
+    "openai.gpt-6-sol":              272_000,
+    "openai.gpt-6.1-sol":            272_000,
+    "openai.gpt-6-luna":             272_000,
 }
 
 # Default for unknown Bedrock models
