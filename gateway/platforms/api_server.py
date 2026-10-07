@@ -52,6 +52,8 @@ _STATIC_FEATURE_FLAGS = {
     "session_resources": True, "model_options": True, "session_chat": True,
     "session_chat_streaming": True, "session_fork": True, "session_model_lock": True,
     "reasoning_streaming": True,
+    # Per-request ``enabled_toolsets`` narrowing (subtractive-only; incognito clients).
+    "enabled_toolsets_override": True,
     "admin_config_rw": False, "jobs_admin": False, "memory_write_api": False,
     "skills_api": True, "audio_api": False, "realtime_voice": False,
     "session_continuity_header": "X-Hermes-Session-Id",
@@ -290,7 +292,25 @@ def _request_agent_overrides(
     model_options = body.get("model_options")
     if isinstance(model_options, dict):
         overrides["model_options"] = dict(model_options)
+    toolsets = _request_toolset_override(body)
+    if toolsets is not None:
+        overrides["enabled_toolsets_override"] = toolsets
     return overrides
+
+
+def _request_toolset_override(body: Any) -> Optional[list[str]]:
+    """Parse a per-request ``enabled_toolsets`` narrowing from the body.
+
+    Returns None when the field is absent or malformed (no override). The consumer
+    intersects the list with the platform config, so a request can only ever REMOVE
+    toolsets, never enable one the operator's config does not grant.
+    """
+    if not isinstance(body, dict):
+        return None
+    raw = body.get("enabled_toolsets")
+    if not isinstance(raw, list):
+        return None
+    return [t.strip() for t in raw if isinstance(t, str) and t.strip()]
 
 
 def _request_relay_metadata(body: Any) -> dict[str, Any]:
@@ -2198,7 +2218,8 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
         model_options: Optional[dict[str, Any]] = None, route: Optional[dict[str, Any]] = None,
         session_model: Optional[str] = None, confirmed_runtime_lock: bool = False,
         room_dispatch: Optional[dict[str, Any]] = None,
-        room_execution_policy: Optional[dict[str, Any]] = None) -> Any:
+        room_execution_policy: Optional[dict[str, Any]] = None,
+        enabled_toolsets_override: Optional[list[str]] = None) -> Any:
         """Create an AIAgent from the gateway runtime config + platform toolsets.
         ``gateway_session_key`` persists across transcripts (memory scope), unlike ``session_id``;
         ``route`` / ``session_model`` are mutually exclusive; ``confirmed_runtime_lock`` beats the
@@ -2237,6 +2258,12 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
             policy = RoomExecutionPolicy.from_mapping(room_execution_policy or {})
             enabled_toolsets = list(policy.enabled_toolsets)
             max_iterations = policy.max_iterations
+        if enabled_toolsets_override is not None:
+            # Per-request NARROWING (e.g. an incognito client dropping ``memory`` so
+            # nothing about the turn is persisted). Strictly subtractive: intersected
+            # with the platform/room grant, so a request can never enable a toolset.
+            enabled_toolsets = sorted(
+                set(enabled_toolsets) & {str(t) for t in enabled_toolsets_override})
         # Reasoning resolves against the model that actually runs (per-model overrides), so only
         # after the precedence chain settles; an explicit request wins.
         if request_reasoning_config is None:
@@ -2862,6 +2889,10 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
                     agent_overrides[dst_key] = requested[src_key]
             if runtime_request.get("model_options"):
                 agent_overrides["model_options"] = runtime_request["model_options"]
+            # A model lock pins the runtime, not the toolset grant: still honor narrowing.
+            _locked_toolsets = _request_toolset_override(body)
+            if _locked_toolsets is not None:
+                agent_overrides["enabled_toolsets_override"] = _locked_toolsets
         else:
             stored_model = self._stored_session_model(session)
             stored_route = self._resolve_route(stored_model)
@@ -3682,7 +3713,8 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
         session_history_delivery: str = "", turn_author: Optional[dict[str, Any]] = None,
         relay_metadata: Optional[dict[str, Any]] = None, notification_category: str = "result",
         resume_unanswered_turn: bool = False, approval_notify_callback=None,
-        approval_session_key: Optional[str] = None, walked_from: Optional[str] = None) -> tuple:
+        approval_session_key: Optional[str] = None, walked_from: Optional[str] = None,
+        enabled_toolsets_override: Optional[list[str]] = None) -> tuple:
         """Create an agent and run one turn in a thread executor -> ``(result, usage)``.
         ``approval_notify_callback`` (with ``approval_session_key``) routes dangerous-command
         approval requests to the caller's stream, keyed like ``/v1/runs`` approvals (#51871).
@@ -3737,7 +3769,8 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
                         reasoning_callback=reasoning_callback, status_callback=status_callback,
                         gateway_session_key=gateway_session_key, requested_model=requested_model,
                         requested_provider=requested_provider, model_options=model_options, route=route,
-                        session_model=session_model, confirmed_runtime_lock=confirmed_runtime_lock)
+                        session_model=session_model, confirmed_runtime_lock=confirmed_runtime_lock,
+                        enabled_toolsets_override=enabled_toolsets_override)
                     if agent_ref is not None:
                         agent_ref[0] = agent
                     if resume_unanswered_turn:

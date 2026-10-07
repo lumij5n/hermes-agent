@@ -822,7 +822,8 @@ async def _handle_runs(self, request: web.Request, *, _api_server) -> web.Respon
         agent_kwargs=dict(
             ephemeral_system_prompt=instructions, session_id=session_id, gateway_session_key=gateway_session_key,
             route=route, room_dispatch=room_dispatch, room_execution_policy=room_execution_policy,
-            **{k: agent_overrides.get(k) for k in ("requested_model", "requested_provider", "model_options")}),
+            **{k: agent_overrides.get(k) for k in (
+                "requested_model", "requested_provider", "model_options", "enabled_toolsets_override")}),
         request_profile=_api_server._api_request_profile.get(),
         turn_author=turn_author, walked_from=walked_from if session_id == stored_session_id else None)
     # A canonical Bot Chat that a Desktop holds live is that Desktop's to run: executing here would
